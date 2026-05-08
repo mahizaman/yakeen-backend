@@ -2,6 +2,10 @@ const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
 const fs = require('fs');
+// Automatically create the uploads folder if it doesn't exist
+if (!fs.existsSync('./uploads')){
+    fs.mkdirSync('./uploads');
+}
 const path = require('path');
 
 const app = express();
