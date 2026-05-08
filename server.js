@@ -2,130 +2,87 @@ const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
 const fs = require('fs');
-// Automatically create the uploads folder if it doesn't exist
-if (!fs.existsSync('./uploads')){
-    fs.mkdirSync('./uploads');
-}
 const path = require('path');
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
-// Middleware
-app.use(cors());
+// 1. Force the uploads folder to exist so Render doesn't crash
+const dir = './uploads';
+if (!fs.existsSync(dir)){
+    fs.mkdirSync(dir, { recursive: true });
+}
+
+// 2. Middleware: The Permission Slips
+app.use(cors()); // This tells Render "Yes, allow Netlify to talk to me!"
 app.use(express.json());
-app.use('/uploads', express.static('uploads')); 
-app.use(express.static(__dirname)); // ADD THIS LINE: It allows the server to load your logo file
+app.use('/uploads', express.static('uploads'));
+app.use(express.static(__dirname));
 
-// Serve the HTML pages directly
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
-app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'admin.html')));
-app.get('/privacy-policy', (req, res) => res.sendFile(path.join(__dirname, 'privacy-policy.html')));
-
-// Add these new pages!
-app.get('/jobs.html', (req, res) => res.sendFile(path.join(__dirname, 'jobs.html')));
-app.get('/about.html', (req, res) => res.sendFile(path.join(__dirname, 'about.html')));
-app.get('/services.html', (req, res) => res.sendFile(path.join(__dirname, 'services.html')));
-app.get('/contact.html', (req, res) => res.sendFile(path.join(__dirname, 'contact.html')));
-
-// Setup Storage for Images, Gallery, and Videos
+// 3. Multer Setup (File Upload Engine)
 const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        const dir = './uploads';
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir);
-        cb(null, dir);
+    destination: function (req, file, cb) {
+        cb(null, 'uploads/');
     },
-    filename: (req, file, cb) => {
-        cb(null, Date.now() + path.extname(file.originalname));
+    filename: function (req, file, cb) {
+        cb(null, Date.now() + '-' + file.originalname.replace(/\s+/g, '-'));
     }
 });
 const upload = multer({ storage: storage });
 
-// Simple JSON Database setup
-const dbFile = './database.json';
-if (!fs.existsSync(dbFile)) {
-    fs.writeFileSync(dbFile, JSON.stringify({ visas: {}, jobs: [], gallery: [] }));
+// Database File Paths
+const dbPath = './database.json';
+
+// Helper function to read/write DB
+function readDB() {
+    if (!fs.existsSync(dbPath)) return { circulars: [], gallery: [], testimonials: [] };
+    return JSON.parse(fs.readFileSync(dbPath));
 }
 
-const readDB = () => JSON.parse(fs.readFileSync(dbFile));
-const writeDB = (data) => fs.writeFileSync(dbFile, JSON.stringify(data, null, 2));
+function writeDB(data) {
+    fs.writeFileSync(dbPath, JSON.stringify(data, null, 2));
+}
 
-// --- API ENDPOINTS ---
+// 4. The Upload Route
+app.post('/api/upload', upload.single('file'), (req, res) => {
+    try {
+        if (!req.file) return res.status(400).json({ error: "No file uploaded." });
+        
+        const category = req.body.category; // 'circulars', 'gallery', or 'testimonials'
+        const db = readDB();
+        
+        // Add new file record to database
+        const newRecord = {
+            url: `/uploads/${req.file.filename}`,
+            type: req.file.mimetype,
+            dateAdded: new Date().toLocaleDateString()
+        };
 
-// --- API ENDPOINTS ---
-
-// 1. Upload Media (Categorized)
-app.post('/api/upload', upload.single('media'), (req, res) => {
-    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-    
-    // Read the category from the form (defaults to gallery if none provided)
-    const category = req.body.category || 'gallery'; 
-    const db = readDB();
-    const fileUrl = `/uploads/${req.file.filename}`;
-    
-    // Ensure the category array exists in the database
-    if (!db[category]) {
-        db[category] = [];
+        if(db[category]) {
+            db[category].push(newRecord);
+            writeDB(db);
+            res.status(200).json({ message: "Success!", record: newRecord });
+        } else {
+            res.status(400).json({ error: "Invalid category" });
+        }
+    } catch (error) {
+        console.error("Upload Error:", error);
+        res.status(500).json({ error: "Server crashed during upload." });
     }
-
-    // Save it to the correct category in database.json
-    db[category].push({ 
-        url: fileUrl, 
-        type: req.file.mimetype,
-        dateAdded: new Date().toLocaleDateString()
-    });
-    
-    writeDB(db);
-    res.json({ message: 'File uploaded successfully', url: fileUrl, category: category });
 });
 
-// 2. Get Media by Category
+// 5. Get Media Routes
 app.get('/api/media/:category', (req, res) => {
     const category = req.params.category;
     const db = readDB();
-    if (db[category]) {
+    if(db[category]) {
         res.json(db[category]);
     } else {
-        res.json([]); // Return empty list if category doesn't exist yet
+        res.status(404).json({ error: "Category not found" });
     }
 });
 
-// 3. Visa Tracker (Update Status - Admin Only)
-app.post('/api/visa/update', (req, res) => {
-    const { passportNumber, status, notes } = req.body;
-    const db = readDB();
-    db.visas[passportNumber] = { status, notes, lastUpdated: new Date() };
-    writeDB(db);
-    res.json({ message: 'Visa status updated' });
-});
-
-// 4. Visa Tracker (Check Status - For Users)
-app.get('/api/visa/:passportNumber', (req, res) => {
-    const db = readDB();
-    const visa = db.visas[req.params.passportNumber];
-    if (visa) {
-        res.json(visa);
-    } else {
-        res.status(404).json({ error: 'Passport not found in system' });
-    }
-});
-
-// 5. Jobs (Add New Job)
-app.post('/api/jobs', (req, res) => {
-    const { title, location, description } = req.body;
-    const db = readDB();
-    const newJob = { id: Date.now(), title, location, description };
-    db.jobs.push(newJob);
-    writeDB(db);
-    res.json({ message: 'Job added successfully', job: newJob });
-});
-
-// 6. Jobs (Get All Jobs)
-app.get('/api/jobs', (req, res) => {
-    res.json(readDB().jobs);
-});
-
-// Start Server
+// Start the Server
 app.listen(PORT, () => {
-    console.log(`Yakeen International Backend running at http://localhost:${PORT}`);
+    console.log(`Server is running on port ${PORT}`);
 });
