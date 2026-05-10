@@ -15,8 +15,8 @@ app.use(express.json());
 // --- 1. CLOUDINARY VAULT SETUP ---
 cloudinary.config({
     cloud_name: 'ds4t0pjmw', // I added your exact Cloud Name here!
-    api_key: 'PASTE_YOUR_API_KEY_HERE',
-    api_secret: 'PASTE_YOUR_API_SECRET_HERE'
+    api_key: '123951967232861',
+    api_secret: 'G7kEZZ-Cq3tcc2GEAtiR6PExLVM'
 });
 
 const storage = new CloudinaryStorage({
