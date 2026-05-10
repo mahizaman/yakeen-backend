@@ -2,38 +2,35 @@ const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
 const fs = require('fs');
-const path = require('path');
+const cloudinary = require('cloudinary').v2;
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// 1. Force the uploads folder to exist so Render doesn't crash
-const dir = './uploads';
-if (!fs.existsSync(dir)){
-    fs.mkdirSync(dir, { recursive: true });
-}
-
-// 2. Middleware: The Permission Slips
-app.use(cors()); // This tells Render "Yes, allow Netlify to talk to me!"
+// Middleware
+app.use(cors());
 app.use(express.json());
-app.use('/uploads', express.static('uploads'));
-app.use(express.static(__dirname));
 
-// 3. Multer Setup (File Upload Engine)
-const storage = multer.diskStorage({
-    destination: function (req, file, cb) {
-        cb(null, 'uploads/');
+// --- 1. CLOUDINARY VAULT SETUP ---
+cloudinary.config({
+    cloud_name: 'ds4t0pjmw', // I added your exact Cloud Name here!
+    api_key: 'PASTE_YOUR_API_KEY_HERE',
+    api_secret: 'PASTE_YOUR_API_SECRET_HERE'
+});
+
+const storage = new CloudinaryStorage({
+    cloudinary: cloudinary,
+    params: {
+        folder: 'yakeen_media', // Cloudinary will create this folder for you
+        allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'mp4', 'mov']
     },
-    filename: function (req, file, cb) {
-        cb(null, Date.now() + '-' + file.originalname.replace(/\s+/g, '-'));
-    }
 });
 const upload = multer({ storage: storage });
 
-// Database File Paths
+// Database File Path
 const dbPath = './database.json';
 
-// Helper function to read/write DB
 function readDB() {
     if (!fs.existsSync(dbPath)) return { circulars: [], gallery: [], testimonials: [] };
     return JSON.parse(fs.readFileSync(dbPath));
@@ -43,17 +40,17 @@ function writeDB(data) {
     fs.writeFileSync(dbPath, JSON.stringify(data, null, 2));
 }
 
-// 4. The Upload Route
+// --- 2. THE PERMANENT UPLOAD ROUTE ---
 app.post('/api/upload', upload.single('file'), (req, res) => {
     try {
         if (!req.file) return res.status(400).json({ error: "No file uploaded." });
-        
-        const category = req.body.category; // 'circulars', 'gallery', or 'testimonials'
+
+        const category = req.body.category;
         const db = readDB();
-        
-        // Add new file record to database
+
+        // req.file.path is the permanent, live Cloudinary URL!
         const newRecord = {
-            url: `/uploads/${req.file.filename}`,
+            url: req.file.path, 
             type: req.file.mimetype,
             dateAdded: new Date().toLocaleDateString()
         };
@@ -71,7 +68,7 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
     }
 });
 
-// 5. Get Media Routes
+// Get Media Routes
 app.get('/api/media/:category', (req, res) => {
     const category = req.params.category;
     const db = readDB();
@@ -82,7 +79,6 @@ app.get('/api/media/:category', (req, res) => {
     }
 });
 
-// Start the Server
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
 });
